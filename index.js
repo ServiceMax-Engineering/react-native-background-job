@@ -63,6 +63,8 @@ const BackgroundJob = {
      * @param {string} obj.jobKey A unique key for the job that was used for registering, and be used for canceling in later stage.
      * @param {number} [obj.timeout = 2000] The amount of time (in ms) after which the React instance should be terminated regardless of whether the task has completed or not.
      * @param {number} [obj.period = 900000] The frequency to run the job with (in ms). This number is not exact, Android may modify it to save batteries. Note: For Android > N, the minimum is 900 0000 (15 min).
+     * @param {boolean} [obj.triggerNow = false] If the job should run once immmediately.
+     * @param {boolean} [obj.recurring = true] If the job should run recurring.
      * @param {boolean} [obj.persist = true] If the job should persist over a device restart.
      * @param {boolean} [obj.override = true] Whether this Job should replace pre-existing jobs with the same key.
      * @param {number} [obj.networkType = NETWORK_TYPE_NONE] Only run for specific network requirements.
@@ -94,6 +96,8 @@ const BackgroundJob = {
     jobKey,
     timeout = 2000,
     period = 900000,
+    triggerNow = false,
+    recurring = true,
     persist = true,
     override = true,
     networkType = this.NETWORK_TYPE_NONE,
@@ -112,10 +116,12 @@ const BackgroundJob = {
         `${tag} The job ${jobKey} has not been registered, you must register it before you can schedule it.`
       );
     } else {
-      jobModule.schedule(
+      jobModule.scheduleNew(
         jobKey,
         timeout,
         period,
+        triggerNow,
+        recurring,
         persist,
         override,
         networkType,

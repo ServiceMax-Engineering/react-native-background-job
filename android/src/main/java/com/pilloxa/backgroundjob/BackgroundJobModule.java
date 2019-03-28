@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.util.Log;
 
@@ -15,6 +16,7 @@ import com.firebase.jobdispatcher.Constraint;
 import com.firebase.jobdispatcher.FirebaseJobDispatcher;
 import com.firebase.jobdispatcher.GooglePlayDriver;
 import com.firebase.jobdispatcher.Job;
+import com.firebase.jobdispatcher.JobTrigger;
 import com.firebase.jobdispatcher.Lifetime;
 import com.firebase.jobdispatcher.RetryStrategy;
 import com.firebase.jobdispatcher.Trigger;
@@ -49,8 +51,21 @@ class BackgroundJobModule extends ReactContextBaseJavaModule {
 
   @ReactMethod
   public void schedule(String jobKey, int timeout, int period, boolean persist, boolean override,
-      int networkType, boolean requiresCharging, boolean requiresDeviceIdle, boolean exact,boolean allowWhileIdle,
-      boolean allowExecutionInForeground, String notificationTitle, String notificationText, Callback callback) {
+                       int networkType, boolean requiresCharging, boolean requiresDeviceIdle, boolean exact,boolean allowWhileIdle,
+                       boolean allowExecutionInForeground,
+                       String notificationTitle, String notificationText, Callback callback) {
+    scheduleNew(jobKey, timeout, period, false, true, persist, override,
+            networkType, requiresCharging, requiresDeviceIdle, exact, allowWhileIdle,
+            allowExecutionInForeground,
+            notificationTitle, notificationText, callback);
+  }
+
+    @ReactMethod
+  public void scheduleNew(String jobKey, int timeout, int period, boolean triggerNow, boolean recurring,
+                          boolean persist, boolean override,
+                          int networkType, boolean requiresCharging, boolean requiresDeviceIdle, boolean exact, boolean allowWhileIdle,
+                          boolean allowExecutionInForeground,
+                       String notificationTitle, String notificationText, Callback callback) {
     final Bundle jobBundle = new Bundle();
     jobBundle.putString("jobKey", jobKey);
     jobBundle.putString("notificationTitle", notificationTitle);
@@ -59,6 +74,8 @@ class BackgroundJobModule extends ReactContextBaseJavaModule {
     jobBundle.putBoolean("persist", persist);
     jobBundle.putBoolean("override", override);
     jobBundle.putLong("period", period);
+    jobBundle.putBoolean("triggerNow", triggerNow);
+    jobBundle.putBoolean("recurring", recurring);
     jobBundle.putInt("networkType", networkType);
     jobBundle.putBoolean("allowWhileIdle",allowWhileIdle);
     jobBundle.putBoolean("requiresCharging", requiresCharging);
@@ -72,8 +89,8 @@ class BackgroundJobModule extends ReactContextBaseJavaModule {
       scheduled = scheduleExactJob(jobKey, period, override, jobBundle);
     } else {
       scheduled =
-          scheduleBackgroundJob(jobKey, period, persist, override, networkType, requiresCharging,
-              jobBundle);
+          scheduleBackgroundJob(jobKey, period, triggerNow, recurring, networkType, requiresCharging, persist, override,
+                  jobBundle);
     }
     callback.invoke(scheduled);
   }
@@ -81,18 +98,27 @@ class BackgroundJobModule extends ReactContextBaseJavaModule {
   /**
    * Schedule a new background job that will be triggered via {@link FirebaseJobDispatcher}.
    */
-  private boolean scheduleBackgroundJob(String jobKey, int period, boolean persist,
-      boolean override, int networkType, boolean requiresCharging, Bundle jobBundle) {
+  private boolean scheduleBackgroundJob(String jobKey, int period, boolean triggerNow, boolean recurring, int networkType, boolean requiresCharging, boolean persist,
+                                        boolean override, Bundle jobBundle) {
     int periodInSeconds = (int) TimeUnit.MILLISECONDS.toSeconds(period);
-    Job.Builder jobBuilder = mJobDispatcher.newJobBuilder()
-        .setService(BackgroundJob.class)
-        .setExtras(jobBundle)
-        .setTag(jobKey)
-        .setTrigger(Trigger.executionWindow(periodInSeconds, periodInSeconds))
-        .setLifetime(persist ? Lifetime.FOREVER : Lifetime.UNTIL_NEXT_BOOT)
-        .setRecurring(true)
-        .setReplaceCurrent(override)
-        .setRetryStrategy(RetryStrategy.DEFAULT_LINEAR);
+    boolean result = false;
+    if (triggerNow) {
+      Job.Builder jobBuilder = getBuilder(
+              jobKey, persist, override, Trigger.NOW, jobBundle
+      );
+      jobBuilder.setRecurring(false);
+      result = scheduleJob(jobKey, jobBuilder, requiresCharging, networkType);
+    }
+    if (!triggerNow || recurring) {
+      Job.Builder jobBuilder = getBuilder(jobKey, persist, override,
+              Trigger.executionWindow(periodInSeconds, periodInSeconds), jobBundle);
+      jobBuilder.setRecurring(recurring);
+      result = scheduleJob(jobKey, jobBuilder, requiresCharging, networkType);
+    }
+    return result;
+  }
+
+  private boolean scheduleJob(String jobKey, Job.Builder jobBuilder, boolean requiresCharging, int networkType) {
     if (requiresCharging) {
       jobBuilder.addConstraint(Constraint.DEVICE_CHARGING);
     }
@@ -106,6 +132,18 @@ class BackgroundJobModule extends ReactContextBaseJavaModule {
       Log.w(LOG_TAG, "Failed to schedule: " + jobKey);
       return false;
     }
+  }
+
+  @NonNull
+  private Job.Builder getBuilder(String jobKey, boolean persist, boolean override, JobTrigger trigger, Bundle jobBundle) {
+    return mJobDispatcher.newJobBuilder()
+        .setService(BackgroundJob.class)
+        .setExtras(jobBundle)
+        .setTag(jobKey)
+        .setTrigger(trigger)
+        .setLifetime(persist ? Lifetime.FOREVER : Lifetime.UNTIL_NEXT_BOOT)
+        .setReplaceCurrent(override)
+        .setRetryStrategy(RetryStrategy.DEFAULT_LINEAR);
   }
 
   /**
